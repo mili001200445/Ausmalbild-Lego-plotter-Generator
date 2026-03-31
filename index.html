@@ -1,0 +1,385 @@
+<!doctype html>
+
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lego Boost Ausmalbild-Generator (schwarz-weiß)</title>
+  <style>
+    /* Schlichter, klarer Stil - kein Cyber-Look */
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+    body{margin:18px;background:#fff;color:#111}
+    h1{font-size:20px;margin:0 0 8px}
+    p{margin:6px 0 14px;color:#333}
+    .container{max-width:980px}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+    .control{display:flex;flex-direction:column;min-width:180px}
+    label{font-size:13px;margin-bottom:6px}
+    input[type=file]{padding:6px}
+    input[type=range]{width:100%}
+    input[type=number]{width:100%}
+    button{background:#111;color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button.secondary{background:#666}
+    .canvases{display:flex;gap:12px;flex-wrap:wrap}
+    .panel{border:1px solid #ddd;padding:8px;border-radius:6px}
+    canvas{display:block;background:#fff;max-width:100%;height:auto}
+    .small{font-size:12px;color:#444}
+    footer{margin-top:14px;font-size:12px;color:#666}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Lego Boost Ausmalbild-Generator — schwarz & weiß</h1>
+    <p>Zieh ein Bild rein oder klick auf <b>Bild öffnen</b>. Mit den Reglern kannst du Linienstärke, Detailgrad, Rauschfilter und Größe einstellen. Am Ende <b>Generieren</b> klicken, dann herunterladen oder drucken.</p><div class="controls">
+  <div class="control">
+    <label for="file">Bild öffnen</label>
+    <input id="file" type="file" accept="image/*">
+    <span class="small">JPG/PNG — am besten ein Foto frontal und scharf</span>
+  </div>
+
+  <div class="control">
+    <label for="scale">Ausgabeskalierung (für Druck) — <span id="scaleVal">1x</span></label>
+    <input id="scale" type="range" min="1" max="10" step="1" value="1">
+    <span class="small">Höher = bessere Auflösung, größerer Download</span>
+  </div>
+
+  <div class="control">
+    <label for="line">Linienstärke — <span id="lineVal">2</span> px</label>
+    <input id="line" type="range" min="1" max="12" step="1" value="2">
+  </div>
+
+  <div class="control">
+    <label for="detail">Detailgrad / Threshold — <span id="detailVal">120</span></label>
+    <input id="detail" type="range" min="0" max="255" step="1" value="120">
+    <span class="small">Kleinerer Wert = mehr Linien</span>
+  </div>
+
+  <div class="control">
+    <label for="blur">Weichzeichnen (Glätten) — <span id="blurVal">1</span></label>
+    <input id="blur" type="range" min="0" max="4" step="1" value="1">
+    <span class="small">Helfen bei verrauschten Bildern</span>
+  </div>
+
+  <div class="control">
+    <label for="despeckle">Rausch-Min-Größe (Pixel) — <span id="despVal">20</span></label>
+    <input id="despeckle" type="range" min="0" max="200" step="5" value="20">
+    <span class="small">Kleine schwarze Punkte entfernen</span>
+  </div>
+
+  <div class="control">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:8px">
+      <button id="generate">Generieren</button>
+      <button id="download" class="secondary">Herunterladen PNG</button>
+      <button id="print" class="secondary">Drucken</button>
+    </div>
+  </div>
+
+  <div class="control">
+    <label for="invert"><input id="invert" type="checkbox"> Linien invertieren (weiß auf schwarz)</label>
+  </div>
+
+</div>
+
+<div class="canvases">
+  <div class="panel" style="flex:1 1 420px;">
+    <strong>Vorschau</strong>
+    <canvas id="preview" width="600" height="400"></canvas>
+    <div class="small">Hier siehst du das verarbeitete Ausmalbild. Du kannst die Regler anpassen und erneut <b>Generieren</b>.</div>
+  </div>
+
+  <div class="panel" style="width:260px;">
+    <strong>Original</strong>
+    <canvas id="source" width="300" height="300"></canvas>
+    <div class="small">Originalbild, skaliert für die Verarbeitung.</div>
+  </div>
+</div>
+
+<footer>Für Lego Boost Drucker: skaliere auf 1–3x je nach Druckgröße. Viel Spaß beim Ausmalen! 😊</footer>
+
+  </div><script>
+// Hilfsfunktionen und Bildverarbeitung
+const fileInput = document.getElementById('file');
+const preview = document.getElementById('preview');
+const source = document.getElementById('source');
+const ctxPrev = preview.getContext('2d');
+const ctxSrc = source.getContext('2d');
+let img = new Image();
+let originalImageLoaded = false;
+
+// Controls
+const scaleEl = document.getElementById('scale');
+const lineEl = document.getElementById('line');
+const detailEl = document.getElementById('detail');
+const blurEl = document.getElementById('blur');
+const despEl = document.getElementById('despeckle');
+const invertEl = document.getElementById('invert');
+const generateBtn = document.getElementById('generate');
+const downloadBtn = document.getElementById('download');
+const printBtn = document.getElementById('print');
+
+// Anzeigen der Werte
+const scaleVal = document.getElementById('scaleVal');
+const lineVal = document.getElementById('lineVal');
+const detailVal = document.getElementById('detailVal');
+const blurVal = document.getElementById('blurVal');
+const despVal = document.getElementById('despVal');
+
+[scaleEl,lineEl,detailEl,blurEl,despEl].forEach(el=>el.addEventListener('input', updateLabels));
+function updateLabels(){
+  scaleVal.textContent = scaleEl.value + 'x';
+  lineVal.textContent = lineEl.value;
+  detailVal.textContent = detailEl.value;
+  blurVal.textContent = blurEl.value;
+  despVal.textContent = despEl.value;
+}
+updateLabels();
+
+fileInput.addEventListener('change', e=>{
+  const f = e.target.files && e.target.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  img = new Image();
+  img.onload = ()=>{
+    originalImageLoaded = true;
+    drawSourcePreview();
+  };
+  img.src = url;
+});
+
+function drawSourcePreview(){
+  // Quelle Canvas auf quadratische Vorschau anpassen
+  const maxW = source.width;
+  const maxH = source.height;
+  const ratio = Math.min(maxW/img.width, maxH/img.height);
+  const w = Math.round(img.width * ratio);
+  const h = Math.round(img.height * ratio);
+  ctxSrc.clearRect(0,0,source.width,source.height);
+  ctxSrc.fillStyle = '#fff'; ctxSrc.fillRect(0,0,source.width,source.height);
+  ctxSrc.drawImage(img, (source.width-w)/2, (source.height-h)/2, w, h);
+}
+
+async function generate(){
+  if(!originalImageLoaded){alert('Bitte zuerst ein Bild öffnen.'); return}
+  // Erzeuge Arbeits-Canvas in gewünschter Größe
+  const scale = parseInt(scaleEl.value,10) || 1;
+  const baseW = Math.min(img.width, 2000); // Begrenze zu große Bilder
+  const baseH = Math.min(img.height, 2000);
+  const w = Math.round(baseW * scale);
+  const h = Math.round(baseH * scale);
+
+  const work = document.createElement('canvas');
+  work.width = w; work.height = h;
+  const wctx = work.getContext('2d');
+  // Weißen Hintergrund
+  wctx.fillStyle = '#fff'; wctx.fillRect(0,0,w,h);
+  // Bild gleichmäßig skalieren auf Arbeitsgröße
+  wctx.drawImage(img, 0, 0, w, h);
+
+  // Pixel holen
+  const imgData = wctx.getImageData(0,0,w,h);
+  const gray = new Float32Array(w*h);
+  for(let i=0;i<w*h;i++){
+    const idx = i*4;
+    const r = imgData.data[idx], g = imgData.data[idx+1], b = imgData.data[idx+2];
+    // Luminanz
+    gray[i] = 0.299*r + 0.587*g + 0.114*b;
+  }
+
+  // Optional: einfacher Box Blur zur Glättung
+  const blurRadius = parseInt(blurEl.value,10) || 0;
+  if(blurRadius>0){
+    boxBlurInPlace(gray,w,h,blurRadius);
+  }
+
+  // Sobel-Kanten
+  const edges = sobelDetect(gray,w,h);
+
+  // Normieren und Threshold
+  const threshold = parseInt(detailEl.value,10);
+  const binary = new Uint8ClampedArray(w*h);
+  for(let i=0;i<w*h;i++){
+    const v = edges[i]; // 0..~1024
+    // Mappe v auf 0..255
+    const val = Math.max(0, Math.min(255, Math.round(v)));
+    binary[i] = (val > threshold) ? 1 : 0; // 1 = Kante
+  }
+
+  // Linien verdicken (Dilation)
+  const thickness = parseInt(lineEl.value,10) || 1;
+  if(thickness>1){
+    dilate(binary,w,h,thickness-1);
+  }
+
+  // Rauschen entfernen: kleine Komponenten löschen
+  const minSize = parseInt(despEl.value,10) || 0;
+  if(minSize>0){
+    removeSmallComponents(binary,w,h,minSize);
+  }
+
+  // Optional invert
+  const invert = invertEl.checked;
+
+  // Zeichnen auf Preview
+  const out = ctxPrev; const canvas = preview;
+  canvas.width = w; canvas.height = h;
+  out.fillStyle = invert ? '#111' : '#fff';
+  out.fillRect(0,0,w,h);
+  const outImg = out.createImageData(w,h);
+  for(let i=0;i<w*h;i++){
+    const idx = i*4;
+    const isEdge = binary[i];
+    if(isEdge){
+      if(!invert){ outImg.data[idx]=0; outImg.data[idx+1]=0; outImg.data[idx+2]=0; outImg.data[idx+3]=255; }
+      else { outImg.data[idx]=255; outImg.data[idx+1]=255; outImg.data[idx+2]=255; outImg.data[idx+3]=255; }
+    } else {
+      if(!invert){ outImg.data[idx]=255; outImg.data[idx+1]=255; outImg.data[idx+2]=255; outImg.data[idx+3]=255; }
+      else { outImg.data[idx]=0; outImg.data[idx+1]=0; outImg.data[idx+2]=0; outImg.data[idx+3]=255; }
+    }
+  }
+  out.putImageData(outImg,0,0);
+
+  // Kleinere Anpassung: damit Source-Vorschau aktuell bleibt
+  drawSourcePreview();
+}
+
+// --- Bildverarbeitungs-Routinen ---
+function boxBlurInPlace(data,w,h,radius){
+  // separable box blur (approx)
+  const tmp = new Float32Array(w*h);
+  let k = radius*2+1;
+  // horizontal
+  for(let y=0;y<h;y++){
+    let sum=0; let row=y*w;
+    for(let x=0;x<w;x++){
+      const i=x+row;
+      sum += data[i];
+      if(x>=k) sum -= data[row + x - k];
+      if(x>=radius) tmp[row + x - radius] = sum / Math.min(k, x+1);
+    }
+  }
+  // vertical
+  for(let x=0;x<w;x++){
+    let sum=0;
+    for(let y=0;y<h;y++){
+      const i = y*w + x;
+      sum += tmp[i];
+      if(y>=k) sum -= tmp[(y-k)*w + x];
+      if(y>=radius) data[(y-radius)*w + x] = sum / Math.min(k, y+1);
+    }
+  }
+}
+
+function sobelDetect(gray,w,h){
+  const out = new Float32Array(w*h);
+  // Sobel kernels
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      const i = y*w + x;
+      const gx = (
+        -1*gray[(y-1)*w + (x-1)] + 1*gray[(y-1)*w + (x+1)]
+        -2*gray[y*w + (x-1)]      + 2*gray[y*w + (x+1)]
+        -1*gray[(y+1)*w + (x-1)] + 1*gray[(y+1)*w + (x+1)]
+      );
+      const gy = (
+        -1*gray[(y-1)*w + (x-1)] -2*gray[(y-1)*w + x] -1*gray[(y-1)*w + (x+1)]
+        +1*gray[(y+1)*w + (x-1)] +2*gray[(y+1)*w + x] +1*gray[(y+1)*w + (x+1)]
+      );
+      const mag = Math.hypot(gx,gy);
+      // skaliere etwas (erhöht Kontrast der Kanten)
+      out[i] = Math.min(255, mag*0.5);
+    }
+  }
+  return out;
+}
+
+function dilate(binary,w,h,iterations){
+  const dirs = [-1,1,-w,w,-w-1,-w+1,w-1,w+1];
+  for(let it=0; it<iterations; it++){
+    const copy = binary.slice();
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        const i = y*w + x;
+        if(copy[i]) continue; // already edge
+        // if any neighbor is edge -> set edge
+        let found=false;
+        for(const d of dirs){ if(copy[i+d]){ found=true; break; } }
+        if(found) binary[i]=1;
+      }
+    }
+  }
+}
+
+function removeSmallComponents(binary,w,h,minSize){
+  // Flood fill for black pixels (1). Entferne Komponenten < minSize
+  const visited = new Uint8Array(w*h);
+  const stack = new Int32Array(w*h); // large enough
+  for(let i=0;i<w*h;i++){
+    if(visited[i] || !binary[i]) continue;
+    // new component
+    let top=0; stack[top++]=i; visited[i]=1; let count=0;
+    while(top){
+      const cur = stack[--top]; count++;
+      const x = cur % w, y = Math.floor(cur / w);
+      // 4-neighborhood
+      if(x>0){ const ni=cur-1; if(!visited[ni] && binary[ni]){ visited[ni]=1; stack[top++]=ni; } }
+      if(x<w-1){ const ni=cur+1; if(!visited[ni] && binary[ni]){ visited[ni]=1; stack[top++]=ni; } }
+      if(y>0){ const ni=cur-w; if(!visited[ni] && binary[ni]){ visited[ni]=1; stack[top++]=ni; } }
+      if(y<h-1){ const ni=cur+w; if(!visited[ni] && binary[ni]){ visited[ni]=1; stack[top++]=ni; } }
+    }
+    if(count < minSize){
+      // remove: set visited pixels (component) to 0
+      // Second pass to clear them
+      // We'll scan whole image and clear visited marks for this component by another flood fill starting at i
+      const clearStack = [i]; binary[i]=0; visited[i]=2;
+      while(clearStack.length){
+        const cur = clearStack.pop();
+        const x = cur % w, y = Math.floor(cur / w);
+        if(x>0){ const ni=cur-1; if(visited[ni]===1 && binary[ni]){ binary[ni]=0; visited[ni]=2; clearStack.push(ni); } }
+        if(x<w-1){ const ni=cur+1; if(visited[ni]===1 && binary[ni]){ binary[ni]=0; visited[ni]=2; clearStack.push(ni); } }
+        if(y>0){ const ni=cur-w; if(visited[ni]===1 && binary[ni]){ binary[ni]=0; visited[ni]=2; clearStack.push(ni); } }
+        if(y<h-1){ const ni=cur+w; if(visited[ni]===1 && binary[ni]){ binary[ni]=0; visited[ni]=2; clearStack.push(ni); } }
+      }
+    } else {
+      // mark component as kept: set visited entries to 2 so we don't attempt to clear it later
+      // do another flood fill to mark visited->2
+      const markStack = [i]; visited[i]=2;
+      while(markStack.length){
+        const cur = markStack.pop();
+        const x = cur % w, y = Math.floor(cur / w);
+        if(x>0){ const ni=cur-1; if(visited[ni]===1){ visited[ni]=2; markStack.push(ni); } }
+        if(x<w-1){ const ni=cur+1; if(visited[ni]===1){ visited[ni]=2; markStack.push(ni); } }
+        if(y>0){ const ni=cur-w; if(visited[ni]===1){ visited[ni]=2; markStack.push(ni); } }
+        if(y<h-1){ const ni=cur+w; if(visited[ni]===1){ visited[ni]=2; markStack.push(ni); } }
+      }
+    }
+  }
+}
+
+// Buttons
+generateBtn.addEventListener('click', ()=>{ generate(); });
+
+downloadBtn.addEventListener('click', ()=>{
+  if(preview.width===0 || preview.height===0){ alert('Bitte erstelle zuerst ein Ausmalbild (Generieren).'); return; }
+  const data = preview.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = data; a.download = 'ausmalbild.png';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+printBtn.addEventListener('click', ()=>{
+  if(preview.width===0 || preview.height===0){ alert('Bitte erstelle zuerst ein Ausmalbild (Generieren).'); return; }
+  const data = preview.toDataURL('image/png');
+  const win = window.open('');
+  win.document.write('<img src="'+data+'" style="max-width:100%;width:100%">');
+  win.document.close();
+  win.focus();
+  win.print();
+});
+
+// Erster Test: Platzhalter-Canvas leeren
+ctxPrev.fillStyle = '#fff'; ctxPrev.fillRect(0,0,preview.width,preview.height);
+ctxSrc.fillStyle = '#fff'; ctxSrc.fillRect(0,0,source.width,source.height);
+
+</script></body>
+</html>
